@@ -35,16 +35,16 @@ def get_youtube_comments(video_url):
     
     return pd.DataFrame(comments)
 
-def get_youtube_comments_api(video_id, api_key, max_comments=1000):    
+def get_youtube_comments_api(video_id, api_key, max_comments=None):    
     youtube = build("youtube", "v3", developerKey=api_key)
     comments = []
     next_page_token = None
-    while len(comments) < max_comments:
+    while True:
         request = youtube.commentThreads().list(
-            part="snippet",
+            part="snippet,replies",
             videoId=video_id,
             pageToken=next_page_token,
-            maxResults=100,  # max per request
+            maxResults=200,  # max per request
             order="time"     # newest first
         )
         response = request.execute()
@@ -56,6 +56,17 @@ def get_youtube_comments_api(video_id, api_key, max_comments=1000):
                 "Message": polish_message(snippet["textDisplay"]),
                 "Time": pd.to_datetime(snippet["publishedAt"])
             })
+
+        # --- Replies ---
+            if "replies" in item:
+                for reply in item["replies"]["comments"]:
+                    reply_snip = reply["snippet"]
+                    comments.append({
+                        "ParentID": snippet["authorDisplayName"],  # parent comment author
+                        "Username": reply_snip["authorDisplayName"],
+                        "Message": "↳ " + polish_message(reply_snip["textDisplay"]),
+                        "Time": pd.to_datetime(reply_snip["publishedAt"])
+                    })    
 
         next_page_token = response.get("nextPageToken")
         if not next_page_token:
@@ -164,7 +175,7 @@ def scrape_comments(link):
             print("✅ Saved YouTube comments to youtube_comments.csv")
         else:
             video_id = re.search(r"(?:v=|\/)([0-9A-Za-z_-]{11}).*", link).group(1)
-            api_key = input("Enter your YouTube API key: ")
+            api_key = input("Enter YouTube Data API Key: ")
             df = get_youtube_comments_api(video_id, api_key)
             df.to_csv(f"youtube_comments.csv", index=False)
             print("✅ Saved YouTube comments to CSV")
