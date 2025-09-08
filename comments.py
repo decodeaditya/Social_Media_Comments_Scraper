@@ -2,6 +2,7 @@ import re
 import pandas as pd
 
 # --- YouTube ---
+import requests
 from youtube_comment_downloader import YoutubeCommentDownloader
 
 # --- Instagram ---
@@ -57,6 +58,41 @@ def get_instagram_comments(post_shortcode):
     return pd.DataFrame(comments)
 
 
+def get_reddit_comments(post_url):
+    #Check if URL have .json at the end
+    if not post_url.endswith(".json"):
+        if post_url[-1] == '/':
+            post_url = post_url + ".json"
+        else:
+            post_url = post_url + "/.json"
+    
+    headers = {
+        "User-Agent": "CommentScraperBot/0.1"
+    }
+
+    response = requests.get(post_url, headers=headers)
+    data = response.json()
+
+    comments = []
+
+    def extract_comments(children):
+        for c in children:
+            kind = c.get("kind")
+            if kind != "t1":
+                continue
+            comment_data = c["data"]
+            comments.append({
+                "Name": comment_data.get("author"),
+                "Date": pd.to_datetime(comment_data.get("created_utc"), unit='s'),
+                "Message": polish_message(comment_data.get("body"))
+            })
+            # Recursively get replies
+            if comment_data.get("replies"):
+                extract_comments(comment_data["replies"]["data"]["children"])
+    
+    extract_comments(data[1]["data"]["children"])
+    return pd.DataFrame(comments)
+
 # --- Main Program ---
 def scrape_comments(link):
     if "youtube.com" in link or "youtu.be" in link:
@@ -73,11 +109,17 @@ def scrape_comments(link):
         df.to_csv("instagram_comments.csv", index=False)
         print("✅ Saved Instagram comments to instagram_comments.csv")
 
+    elif "reddit.com" in link:
+        print("👽 Detected Reddit link")
+        df = get_reddit_comments(link)
+        df.to_csv("reddit_comments.csv", index=False)
+        print("✅ Saved Reddit comments to reddit_comments.csv")    
+
     else:
         print("❌ Unsupported link")
 
 
 # --- Run ---
 if __name__ == "__main__":
-    link = input("Enter YouTube or Instagram link: ")
+    link = input("Enter Post link [Instagram/YouTube/Reddit]: ")
     scrape_comments(link)
