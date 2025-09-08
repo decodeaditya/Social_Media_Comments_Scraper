@@ -1,5 +1,10 @@
 import re
 import pandas as pd
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+import time
+from googleapiclient.discovery import build
 
 # --- YouTube ---
 import requests
@@ -30,32 +35,87 @@ def get_youtube_comments(video_url):
     
     return pd.DataFrame(comments)
 
+def get_youtube_comments_api(video_id, api_key, max_comments=1000):    
+    youtube = build("youtube", "v3", developerKey=api_key)
+    comments = []
+    next_page_token = None
+    while len(comments) < max_comments:
+        request = youtube.commentThreads().list(
+            part="snippet",
+            videoId=video_id,
+            pageToken=next_page_token,
+            maxResults=100,  # max per request
+            order="time"     # newest first
+        )
+        response = request.execute()
+
+        for item in response["items"]:
+            snippet = item["snippet"]["topLevelComment"]["snippet"]
+            comments.append({
+                "Username": snippet["authorDisplayName"],
+                "Message": polish_message(snippet["textDisplay"]),
+                "Time": pd.to_datetime(snippet["publishedAt"])
+            })
+
+        next_page_token = response.get("nextPageToken")
+        if not next_page_token:
+            break
+
+    return pd.DataFrame(comments[:max_comments])
+
 
 # --- Scrape Instagram Comments (using session file) ---
-def get_instagram_comments(post_shortcode):
-    L = instaloader.Instaloader()
+def get_instagram_comments(post_url, username, password, max_comments=200):
+    options = webdriver.ChromeOptions()
+    options.add_argument("--start-maximized")
+    driver = webdriver.Chrome(options=options)
 
-    try:
-        # load saved session (avoids login problems + 2FA)
-        L.load_session_from_file("your_username")
-    except:
-        # fallback: ask for login once
-        username = input("Instagram Username: ")
-        password = input("Instagram Password: ")
-        L.login(username, password)
-        L.save_session_to_file()  # save for next time
+    # Step 1: Login
+    driver.get("https://www.instagram.com/accounts/login/")
+    time.sleep(3)
 
-    post = instaloader.Post.from_shortcode(L.context, post_shortcode)
-    comments = []
+    user_input = driver.find_element(By.NAME, "username")
+    pass_input = driver.find_element(By.NAME, "password")
+    user_input.send_keys(username)
+    pass_input.send_keys(password)
+    pass_input.send_keys(Keys.RETURN)
+    time.sleep(5)
 
-    for c in post.get_comments():
-        comments.append({
-            "Name": c.owner.username,
-            "Date": c.created_at_utc,
-            "Message": polish_message(c.text)
-        })
+    # Step 2: Go to post
+    driver.get(post_url)
+    time.sleep(5)
 
-    return pd.DataFrame(comments)
+    # Step 3: Load comments
+    comments_data = []
+    while len(comments_data) < max_comments:
+        try:
+            load_more = driver.find_element(By.XPATH, "//button[contains(text(),'Load more comments')]")
+            load_more.click()
+            time.sleep(2)
+        except:
+            pass  # No more "Load more comments"
+
+        comment_elements = driver.find_elements(By.XPATH, "//ul[contains(@class,'XQXOT')]/div/li")
+        for c in comment_elements:
+            try:
+                username_el = c.find_element(By.XPATH, ".//h3//a")
+                message_el = c.find_element(By.XPATH, ".//span")
+                time_el = c.find_element(By.TAG_NAME, "time")
+                
+                comments_data.append({
+                    "Username": username_el.text,
+                    "Message": polish_message(message_el.text),
+                    "Time": pd.to_datetime(time_el.get_attribute("datetime"))
+                })
+            except:
+                continue
+
+        # Break if reached max_comments
+        if len(comments_data) >= max_comments:
+            break
+
+    driver.quit()
+    return pd.DataFrame(comments_data[:max_comments])
 
 
 def get_reddit_comments(post_url):
@@ -97,15 +157,24 @@ def get_reddit_comments(post_url):
 def scrape_comments(link):
     if "youtube.com" in link or "youtu.be" in link:
         print("🎥 Detected YouTube link")
-        df = get_youtube_comments(link)
-        df.to_csv("youtube_comments.csv", index=False)
-        print("✅ Saved YouTube comments to youtube_comments.csv")
+        method = input("Choose method - (1) API (2) Web Scraping [1/2]: ")
+        if method == "2":
+            df = get_youtube_comments(link)
+            df.to_csv("youtube_comments.csv", index=False)
+            print("✅ Saved YouTube comments to youtube_comments.csv")
+        else:
+            video_id = re.search(r"(?:v=|\/)([0-9A-Za-z_-]{11}).*", link).group(1)
+            api_key = input("Enter your YouTube API key: ")
+            df = get_youtube_comments_api(video_id, api_key)
+            df.to_csv(f"youtube_comments.csv", index=False)
+            print("✅ Saved YouTube comments to CSV")
 
     elif "instagram.com" in link:
         print("📸 Detected Instagram link")
         # extract shortcode from link
-        shortcode = link.rstrip("/").split("/")[-1]
-        df = get_instagram_comments(shortcode)
+        username = input("Enter Instagram username: ")
+        password = input("Enter Instagram password: ")
+        df = get_instagram_comments(link, username, password)
         df.to_csv("instagram_comments.csv", index=False)
         print("✅ Saved Instagram comments to instagram_comments.csv")
 
