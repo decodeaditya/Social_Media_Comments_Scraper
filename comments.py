@@ -11,7 +11,11 @@ import requests
 from youtube_comment_downloader import YoutubeCommentDownloader
 
 # --- Instagram ---
-import instaloader
+import os
+from dotenv import load_dotenv
+load_dotenv()
+
+youtube_api_key = os.getenv("YOUTUBE_API_KEY")
 
 
 # --- Polishing Function ---
@@ -175,7 +179,7 @@ def scrape_comments(link):
             print("✅ Saved YouTube comments to youtube_comments.csv")
         else:
             video_id = re.search(r"(?:v=|\/)([0-9A-Za-z_-]{11}).*", link).group(1)
-            api_key = input("Enter YouTube Data API Key: ")
+            api_key = youtube_api_key
             df = get_youtube_comments_api(video_id, api_key)
             df.to_csv(f"youtube_comments.csv", index=False)
             print("✅ Saved YouTube comments to CSV")

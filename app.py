@@ -23,6 +23,12 @@ link = st.text_input("🔗 Enter Post Link (YouTube / Instagram / Reddit):")
 
 df = None
 
+import os
+from dotenv import load_dotenv
+load_dotenv()
+
+youtube_api_key = os.getenv("YOUTUBE_API_KEY")
+
 if link:
     # Detect platform
     if "youtube.com" in link or "youtu.be" in link:
@@ -30,7 +36,7 @@ if link:
         method = st.radio("Choose scraping method:", ["API", "Web Scraping"], horizontal=True)
 
         if method == "API":
-            api_key = st.text_input("🔑 Enter YouTube Data API Key:", type="password")
+            api_key = youtube_api_key
             if api_key and st.button("🚀 Scrape via YouTube API", use_container_width=True):
                 with st.spinner("Fetching comments..."):
                     video_id = re.search(r"(?:v=|\/)([0-9A-Za-z_-]{11}).*", link).group(1)
